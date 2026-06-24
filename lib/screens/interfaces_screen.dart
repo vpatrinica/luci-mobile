@@ -136,12 +136,16 @@ class _InterfacesScreenState extends ConsumerState<InterfacesScreen> {
 
         if (dashboardData != null) {
           // Check wired interfaces first
-          final wiredInterfaces =
-              dashboardData['interfaceDump']?['interface'] as List<dynamic>?;
+            final wiredInterfaces =
+              appState.extractInterfaceList(dashboardData['interfaceDump']);
           if (wiredInterfaces != null) {
             for (int i = 0; i < wiredInterfaces.length; i++) {
-              final iface = wiredInterfaces[i] as Map<String, dynamic>;
-              final name = iface['interface'] as String? ?? '';
+              final item = wiredInterfaces[i];
+              if (item is! Map<String, dynamic>) continue;
+              final iface = item as Map<String, dynamic>;
+              final name = iface['interface'] is String
+                  ? (iface['interface'] as String)
+                  : iface['interface']?.toString() ?? '';
               final keyStr = _interfaceKey(name: name);
               // Use exact matching only
               if (keyStr == interfaceName.toLowerCase()) {
@@ -152,42 +156,76 @@ class _InterfacesScreenState extends ConsumerState<InterfacesScreen> {
           }
 
           // If not found in wired, check wireless interfaces
-          final wirelessData =
-              dashboardData['wireless'] as Map<String, dynamic>?;
-          if (wirelessData != null) {
+          final wirelessRaw = dashboardData['wireless'];
+          if (wirelessRaw != null) {
             final normalizedTarget = _normalizeInterfaceKey(interfaceName);
-            wirelessData.forEach((radioName, radioData) {
-              final interfaces = radioData['interfaces'] as List<dynamic>?;
-              if (interfaces != null) {
-                for (var i = 0; i < interfaces.length; i++) {
-                  final interface = interfaces[i];
-                  final config = interface['config'] ?? {};
-                  final iwinfo = interface['iwinfo'] ?? {};
-                  final deviceName = _uciString(config['device'], radioName);
-                  final ssid = _uciString(iwinfo['ssid']).isNotEmpty
-                      ? _uciString(iwinfo['ssid'])
-                      : _uciString(config['ssid']);
-                  final name = interface['name'] ?? '';
-                  final keyStr = _interfaceKeyForWireless(
-                    ssid: ssid,
-                    radioName: radioName,
-                    deviceName: deviceName,
-                    name: name,
-                  );
-                  // Generate all possible normalized keys for matching
-                  final ssidKey = _normalizeInterfaceKey(ssid);
-                  final deviceKey = _normalizeInterfaceKey(deviceName);
-                  final nameKey = _normalizeInterfaceKey(name);
-                  // Match against all possible keys
-                  if (normalizedTarget == ssidKey ||
-                      normalizedTarget == deviceKey ||
-                      normalizedTarget == nameKey) {
-                    _scrollToExpandedCard(keyStr);
-                    return;
+            if (wirelessRaw is Map) {
+              wirelessRaw.forEach((radioName, radioData) {
+                final interfaces = radioData is Map ? radioData['interfaces'] as List<dynamic>? : null;
+                if (interfaces != null) {
+                  for (var interfaceItem in interfaces) {
+                    final interface = interfaceItem is Map ? interfaceItem as Map<String, dynamic> : <String, dynamic>{};
+                    final config = interface['config'] ?? {};
+                    final iwinfo = interface['iwinfo'] ?? {};
+                    final deviceName = _uciString(config['device'], radioName.toString());
+                    final ssid = _uciString(iwinfo['ssid']).isNotEmpty
+                        ? _uciString(iwinfo['ssid'])
+                        : _uciString(config['ssid']);
+                    final name = interface['name'] ?? '';
+                    final keyStr = _interfaceKeyForWireless(
+                      ssid: ssid,
+                      radioName: radioName.toString(),
+                      deviceName: deviceName,
+                      name: name,
+                    );
+                    // Generate all possible normalized keys for matching
+                    final ssidKey = _normalizeInterfaceKey(ssid);
+                    final deviceKey = _normalizeInterfaceKey(deviceName);
+                    final nameKey = _normalizeInterfaceKey(name);
+                    // Match against all possible keys
+                    if (normalizedTarget == ssidKey ||
+                        normalizedTarget == deviceKey ||
+                        normalizedTarget == nameKey) {
+                      _scrollToExpandedCard(keyStr);
+                      return;
+                    }
+                  }
+                }
+              });
+            } else if (wirelessRaw is List) {
+              for (final radioItem in wirelessRaw) {
+                final radioMap = radioItem is Map ? radioItem as Map<String, dynamic> : <String, dynamic>{};
+                final radioName = radioMap['device']?.toString() ?? '';
+                final interfaces = radioMap['interfaces'] as List<dynamic>?;
+                if (interfaces != null) {
+                  for (var interfaceItem in interfaces) {
+                    final interface = interfaceItem is Map ? interfaceItem as Map<String, dynamic> : <String, dynamic>{};
+                    final config = interface['config'] ?? {};
+                    final iwinfo = interface['iwinfo'] ?? {};
+                    final deviceName = _uciString(config['device'], radioName);
+                    final ssid = _uciString(iwinfo['ssid']).isNotEmpty
+                        ? _uciString(iwinfo['ssid'])
+                        : _uciString(config['ssid']);
+                    final name = interface['name'] ?? '';
+                    final keyStr = _interfaceKeyForWireless(
+                      ssid: ssid,
+                      radioName: radioName,
+                      deviceName: deviceName,
+                      name: name,
+                    );
+                    final ssidKey = _normalizeInterfaceKey(ssid);
+                    final deviceKey = _normalizeInterfaceKey(deviceName);
+                    final nameKey = _normalizeInterfaceKey(name);
+                    if (normalizedTarget == ssidKey ||
+                        normalizedTarget == deviceKey ||
+                        normalizedTarget == nameKey) {
+                      _scrollToExpandedCard(keyStr);
+                      return;
+                    }
                   }
                 }
               }
-            });
+            }
           }
         }
 
@@ -434,22 +472,19 @@ class _InterfacesScreenState extends ConsumerState<InterfacesScreen> {
     final dynamic statsDataSource = appState.dashboardData?['networkDevices'];
     var interfacesList = <NetworkInterface>[];
 
-    if (detailedData is Map &&
-        detailedData.containsKey('interface') &&
-        detailedData['interface'] is List) {
-      final List<dynamic> interfaceDataList = detailedData['interface'];
-      final Map<String, dynamic> networkStatsMap = statsDataSource is Map
-          ? Map<String, dynamic>.from(statsDataSource)
-          : <String, dynamic>{};
+    final interfacesRaw = appState.extractInterfaceList(detailedData);
+    final Map<String, dynamic> networkStatsMap = statsDataSource is Map
+        ? Map<String, dynamic>.from(statsDataSource)
+        : <String, dynamic>{};
 
-      interfacesList = interfaceDataList.whereType<Map<String, dynamic>>().map((
-        detailedInterfaceMap,
-      ) {
+    if (interfacesRaw != null) {
+      interfacesList = interfacesRaw
+          .whereType<Map<String, dynamic>>()
+          .map((detailedInterfaceMap) {
         final stats = detailedInterfaceMap['stats'];
         if (stats == null || (stats is Map && stats.isEmpty)) {
           final String? deviceName =
-              detailedInterfaceMap['l3_device'] ??
-              detailedInterfaceMap['device'];
+              detailedInterfaceMap['l3_device'] ?? detailedInterfaceMap['device'];
           if (deviceName != null) {
             final statsContainer = networkStatsMap[deviceName];
             if (statsContainer is Map && statsContainer['stats'] is Map) {
@@ -501,14 +536,16 @@ class _InterfacesScreenState extends ConsumerState<InterfacesScreen> {
     final uciRadios = <String, Map>{};
     final uciInterfaces = <String, Map>{};
 
-    final uciValues = uciWirelessConfig?['values'] as Map?;
+    // uciWirelessConfig may be a Map with 'values' or a different shape; guard access
+    final uciValues = (uciWirelessConfig is Map) ? (uciWirelessConfig['values'] as Map?) : null;
     if (uciValues != null) {
       uciValues.forEach((key, value) {
-        final typedValue = value as Map?;
-        if (typedValue?['.type'] == 'wifi-device') {
-          uciRadios[key] = typedValue!;
-        } else if (typedValue?['.type'] == 'wifi-iface') {
-          uciInterfaces[key] = typedValue!;
+        final typedValue = value is Map ? value as Map<String, dynamic> : null;
+        if (typedValue == null) return;
+        if (typedValue['.type'] == 'wifi-device') {
+          uciRadios[key] = typedValue;
+        } else if (typedValue['.type'] == 'wifi-iface') {
+          uciInterfaces[key] = typedValue;
         }
       });
     }

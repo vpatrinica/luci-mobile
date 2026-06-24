@@ -793,8 +793,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
   Widget _buildWirelessNetworksCard(AppState appState) {
     final prefs = appState.dashboardPreferences;
-    final wirelessRadios =
-        appState.dashboardData?['wireless'] as Map<String, dynamic>?;
+    final wirelessRaw = appState.dashboardData?['wireless'];
     final uciWirelessConfig = appState.dashboardData?['uciWirelessConfig'];
 
     // Track which interfaces we've already added from runtime data
@@ -803,72 +802,115 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     List<Widget> networkCardWidgets = [];
 
     // First, add interfaces from runtime wireless data
-    if (wirelessRadios != null) {
-      wirelessRadios.forEach((radioName, radioData) {
-        final interfaces = radioData['interfaces'] as List<dynamic>?;
-        if (interfaces != null) {
-          for (var interface in interfaces) {
-            final config = interface['config'] ?? {};
-            final iwinfo = interface['iwinfo'] ?? {};
-            final ssid = iwinfo['ssid'] ?? config['ssid'] ?? 'N/A';
-            if (ssid == 'N/A') continue;
+    if (wirelessRaw != null) {
+      // helper to process a single interface map
+      void addInterface(Map ifaceMapRaw, String radioName) {
+        final ifaceMap = ifaceMapRaw is Map ? ifaceMapRaw as Map<String, dynamic> : <String, dynamic>{};
 
-            final deviceName = config['device'] ?? radioName;
-            final interfaceId = '$ssid ($deviceName)';
-            final uciName = interface['section'] as String?;
+        final config = (ifaceMap['config'] is Map)
+            ? (ifaceMap['config'] as Map<String, dynamic>)
+            : <String, dynamic>{};
 
-            if (uciName != null) {
-              addedInterfaces.add(uciName);
-            }
+        final iwinfo = (ifaceMap['iwinfo'] is Map)
+            ? (ifaceMap['iwinfo'] as Map<String, dynamic>)
+            : <String, dynamic>{};
 
-            // If preferences are not empty, check if this interface should be shown
-            // Empty preferences means show all interfaces by default
-            if (prefs.enabledWirelessInterfaces.isNotEmpty &&
-                !prefs.enabledWirelessInterfaces.contains(interfaceId)) {
-              continue; // Skip this interface
-            }
+        final rawSsid = iwinfo['ssid'] ?? config['ssid'];
+        final ssid = rawSsid?.toString() ?? 'N/A';
+        if (ssid == 'N/A') return;
 
-            final isEnabled = !(config['disabled'] as bool? ?? false);
-            final channel = (iwinfo['channel'] ?? config['channel'] ?? 'N/A')
-                .toString();
-            final signal = iwinfo['signal'] as int?;
+        final deviceName = (config['device'] ?? radioName).toString();
+        final interfaceId = '$ssid ($deviceName)';
+        final uciName = ifaceMap['section'] is String ? ifaceMap['section'] as String : null;
 
-            networkCardWidgets.add(
-              Card(
-                margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                elevation: 2,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(18),
-                  onLongPress: () {
-                    // Navigate to interfaces tab with the specific interface name
-                    final appState = ref.read(appStateProvider);
-                    appState.requestTab(2, interfaceToScroll: deviceName);
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: _buildWirelessInfoCardContent(
-                      context,
-                      ssid: ssid,
-                      isEnabled: isEnabled,
-                      signal: signal,
-                      channel: channel,
-                    ),
-                  ),
+        if (uciName != null) {
+          addedInterfaces.add(uciName);
+        }
+
+        if (prefs.enabledWirelessInterfaces.isNotEmpty &&
+            !prefs.enabledWirelessInterfaces.contains(interfaceId)) {
+          return; // Skip this interface
+        }
+
+        // Determine enabled state from possible boolean or string values
+        bool disabledFlag = false;
+        if (config['disabled'] is bool) {
+          disabledFlag = config['disabled'] as bool;
+        } else if (config['disabled'] != null) {
+          disabledFlag = config['disabled'].toString() == '1';
+        }
+        final isEnabled = !disabledFlag;
+
+        final channel = (iwinfo['channel'] ?? config['channel'] ?? 'N/A').toString();
+
+        int? signal;
+        if (iwinfo['signal'] is int) {
+          signal = iwinfo['signal'] as int;
+        } else if (iwinfo['signal'] != null) {
+          final parsed = int.tryParse(iwinfo['signal'].toString());
+          signal = parsed;
+        }
+
+        networkCardWidgets.add(
+          Card(
+            margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+            elevation: 2,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(18),
+              onLongPress: () {
+                final appState = ref.read(appStateProvider);
+                appState.requestTab(2, interfaceToScroll: deviceName);
+              },
+              child: Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: _buildWirelessInfoCardContent(
+                  context,
+                  ssid: ssid,
+                  isEnabled: isEnabled,
+                  signal: signal,
+                  channel: channel,
                 ),
               ),
-            );
+            ),
+          ),
+        );
+      }
+
+      if (wirelessRaw is Map) {
+        wirelessRaw.forEach((radioName, radioData) {
+          final radioMap = radioData is Map ? radioData as Map<String, dynamic> : <String, dynamic>{};
+          final interfaces = radioMap['interfaces'];
+          if (interfaces is List) {
+            for (var interface in interfaces) {
+              addInterface(interface, radioName.toString());
+            }
+          }
+        });
+      } else if (wirelessRaw is List) {
+        for (var i = 0; i < wirelessRaw.length; i++) {
+          final radioData = wirelessRaw[i];
+          final radioMap = radioData is Map ? radioData as Map<String, dynamic> : <String, dynamic>{};
+          final radioName = radioMap['device']?.toString() ?? 'radio_$i';
+          final interfaces = radioMap['interfaces'];
+          if (interfaces is List) {
+            for (var interface in interfaces) {
+              addInterface(interface, radioName);
+            }
           }
         }
-      });
+      }
     }
 
     // Now add disabled interfaces from UCI config that aren't in runtime data
     if (uciWirelessConfig != null) {
-      final uciValues = uciWirelessConfig['values'] as Map?;
+      // uciWirelessConfig may be a Map with 'values' or other shapes (list/map)
+      final uciValues = (uciWirelessConfig is Map)
+          ? (uciWirelessConfig['values'] as Map?)
+          : null;
       if (uciValues != null) {
         final uciRadios = <String, Map>{};
         final uciInterfaces = <String, Map>{};
@@ -1081,9 +1123,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
   Widget _buildInterfaceStatusCards(AppState appState) {
     final prefs = appState.dashboardPreferences;
-    final interfaces =
-        appState.dashboardData?['interfaceDump']?['interface']
-            as List<dynamic>?;
+    final interfaces = appState.extractInterfaceList(
+      appState.dashboardData?['interfaceDump']);
     if (interfaces == null || interfaces.isEmpty) {
       return const SizedBox.shrink();
     }
@@ -1110,8 +1151,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
     List<Widget> interfaceCardWidgets = [];
     for (var item in wanVpnInterfaces) {
+      if (item is! Map<String, dynamic>) continue;
       final interface = item as Map<String, dynamic>;
-      final name = interface['interface'] as String? ?? 'N/A';
+      final name = interface['interface'] is String
+        ? (interface['interface'] as String)
+        : interface['interface']?.toString() ?? 'N/A';
       final isUp = interface['up'] as bool? ?? false;
       final proto = interface['proto'] as String? ?? '';
 

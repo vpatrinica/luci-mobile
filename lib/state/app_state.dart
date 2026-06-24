@@ -648,7 +648,7 @@ class AppState extends ChangeNotifier {
       final boardInfoData = getData(results[0]);
       final sysInfoData = getData(results[1]);
       final networkData = getData(results[2]) as Map<String, dynamic>?;
-      final interfaceDump = getData(results[3]) as Map<String, dynamic>?;
+      final interfaceDump = getData(results[3]);
       final dhcpLeases = getData(results[4]) as Map<String, dynamic>?;
 
       // Await optional wireless futures in parallel (won't throw — wired-only routers are fine)
@@ -674,11 +674,10 @@ class AppState extends ChangeNotifier {
 
       // Fetch WireGuard peer information for WireGuard interfaces
       final wireguardData = <String, dynamic>{};
-      if (interfaceDump != null && interfaceDump['interface'] is List) {
+      final interfacesList = extractInterfaceList(interfaceDump);
+      if (interfacesList != null) {
         // Check if there are any WireGuard interfaces
-        final hasWireGuardInterfaces = interfaceDump['interface'].any((
-          interface,
-        ) {
+        final hasWireGuardInterfaces = interfacesList.any((interface) {
           if (interface is Map<String, dynamic>) {
             final proto = interface['proto'] as String?;
             return proto == 'wireguard';
@@ -698,7 +697,7 @@ class AppState extends ChangeNotifier {
           if (allWireGuardData != null) {
             // The new endpoint returns data for all interfaces
             // We need to extract data for each WireGuard interface
-            for (final interface in interfaceDump['interface']) {
+            for (final interface in interfacesList) {
               if (interface is Map<String, dynamic>) {
                 final ifname = interface['interface'] as String?;
                 final proto = interface['proto'] as String?;
@@ -718,8 +717,9 @@ class AppState extends ChangeNotifier {
 
       // Throughput calculation - collect ALL interface devices
       final wanDeviceNames = <String>{};
-      if (interfaceDump != null && interfaceDump['interface'] is List) {
-        for (final interface in interfaceDump['interface']) {
+      final interfacesForWan = extractInterfaceList(interfaceDump);
+      if (interfacesForWan != null) {
+        for (final interface in interfacesForWan) {
           if (interface is Map<String, dynamic>) {
             final ifname = interface['interface'] as String?;
             // Skip only loopback interface
@@ -828,23 +828,21 @@ class AppState extends ChangeNotifier {
   }
 
   Map<String, dynamic>? _extractWanData(Map<String, dynamic>? interfaceDump) {
-    if (interfaceDump == null || interfaceDump['interface'] == null) {
-      return null;
-    }
+    final interfaces = extractInterfaceList(interfaceDump);
+    if (interfaces == null) return null;
     try {
-      for (var interface in interfaceDump['interface']) {
-        if (interface['route'] is List) {
+      for (var interface in interfaces) {
+        if (interface is Map && interface['route'] is List) {
           for (var route in interface['route']) {
             if (route is Map &&
                 route['target'] == '0.0.0.0' &&
                 route['mask'] == 0) {
-              return interface;
+              return interface as Map<String, dynamic>?;
             }
           }
         }
       }
     } catch (e) {
-      // print('WAN data extraction error: $e');
       return null;
     }
     return null;
@@ -874,6 +872,21 @@ class AppState extends ChangeNotifier {
     // If not found in interface dump, check if it's already a device name
     // (e.g., eth0, br-lan, wlan0)
     return interfaceName;
+  }
+
+  /// Safely extracts a list of interface maps from various possible shapes
+  /// returned by the RUTOS REST API. The router may return either:
+  /// - a Map with key `interface` containing a List, or
+  /// - a List directly (older or alternative endpoints).
+  ///
+  /// Returns `null` when no interfaces are available.
+  List<dynamic>? extractInterfaceList(dynamic interfaceDump) {
+    if (interfaceDump == null) return null;
+    if (interfaceDump is List) return interfaceDump;
+    if (interfaceDump is Map && interfaceDump['interface'] is List) {
+      return interfaceDump['interface'] as List<dynamic>;
+    }
+    return null;
   }
 
   void _startThroughputTimer() {

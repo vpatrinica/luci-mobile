@@ -104,8 +104,8 @@ class _RouterDashboardSettingsScreenState
       });
     }
 
-    final interfaces =
-        dashboardData['interfaceDump']?['interface'] as List<dynamic>?;
+    final appState = ref.read(appStateProvider);
+    final interfaces = appState.extractInterfaceList(dashboardData?['interfaceDump']);
     if (interfaces != null) {
       for (var item in interfaces) {
         final interface = item as Map<String, dynamic>;
