@@ -24,6 +24,17 @@ Uri _buildUrl(String ipAddress, bool useHttps, String path) {
   return Uri.parse('$scheme://$host$path');
 }
 
+String? normalizeLoginToken({
+  required String? token,
+  required bool redirectedToHttps,
+  required bool wasUsingHttp,
+}) {
+  if (token == null || token.isEmpty) {
+    return redirectedToHttps && wasUsingHttp ? null : token;
+  }
+  return redirectedToHttps && wasUsingHttp ? 'HTTPS_REDIRECT:$token' : token;
+}
+
 class RealApiService implements IApiService {
   final HttpClientManager _httpClientManager = HttpClientManager();
 
@@ -54,7 +65,7 @@ class RealApiService implements IApiService {
       useHttps,
       context: context,
     );
-    if (result.token == null) {
+    if (result.token == null || result.token!.isEmpty) {
       throw Exception('Login failed');
     }
     return result.token!;
@@ -145,9 +156,12 @@ class RealApiService implements IApiService {
             response.realUri.scheme == 'https';
         if (redirectedToHttps) {
           Logger.info('Detected HTTP→HTTPS redirect via /api/login: $uri');
-          // Try to parse a token from this response; otherwise signal redirect
           final token = _parseRutosToken(response.data);
-          return token != null ? 'HTTPS_REDIRECT:$token' : 'HTTPS_REDIRECT:';
+          return normalizeLoginToken(
+            token: token,
+            redirectedToHttps: true,
+            wasUsingHttp: true,
+          );
         }
       }
 

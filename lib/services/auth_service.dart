@@ -54,7 +54,7 @@ class RealAuthService implements IAuthService {
           context: context,
         );
 
-        if (loginResult.token != null) {
+        if (loginResult.token != null && loginResult.token!.isNotEmpty) {
           _sysauth = loginResult.token;
           _ipAddress = ip;
           _useHttps = loginResult.actualUseHttps; // Use the detected protocol
