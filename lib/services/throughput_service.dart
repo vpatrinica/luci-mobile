@@ -150,11 +150,23 @@ class ThroughputService {
         now.difference(lastTimestamp).inMilliseconds / 1000.0;
 
     if (elapsedSeconds >= _minElapsedSeconds) {
-      // Handle both formats: stats.rx_bytes and direct rx_bytes
-      final lastRx = (lastStats['stats']?['rx_bytes'] ?? lastStats['rx_bytes'] ?? 0) as num;
-      final lastTx = (lastStats['stats']?['tx_bytes'] ?? lastStats['tx_bytes'] ?? 0) as num;
-      final currentRx = (devData['stats']?['rx_bytes'] ?? devData['rx_bytes'] ?? 0) as num;
-      final currentTx = (devData['stats']?['tx_bytes'] ?? devData['tx_bytes'] ?? 0) as num;
+      // Handle all formats: stats.rx_bytes (LuCI), statistics.rx_bytes (RUTOS), direct rx_bytes
+      final lastRx = (lastStats['stats']?['rx_bytes']
+          ?? lastStats['statistics']?['rx_bytes']
+          ?? lastStats['rx_bytes']
+          ?? 0) as num;
+      final lastTx = (lastStats['stats']?['tx_bytes']
+          ?? lastStats['statistics']?['tx_bytes']
+          ?? lastStats['tx_bytes']
+          ?? 0) as num;
+      final currentRx = (devData['stats']?['rx_bytes']
+          ?? devData['statistics']?['rx_bytes']
+          ?? devData['rx_bytes']
+          ?? 0) as num;
+      final currentTx = (devData['stats']?['tx_bytes']
+          ?? devData['statistics']?['tx_bytes']
+          ?? devData['tx_bytes']
+          ?? 0) as num;
 
       final rxRate = max(0, (currentRx - lastRx) / elapsedSeconds);
       final txRate = max(0, (currentTx - lastTx) / elapsedSeconds);
@@ -249,6 +261,10 @@ class ThroughputService {
           if (devData['stats'] is Map<String, dynamic> &&
               devData['stats'][key] != null) {
             total += devData['stats'][key];
+          } else if (devData['statistics'] is Map<String, dynamic> &&
+              devData['statistics'][key] != null) {
+            // RUTOS network.device status format
+            total += devData['statistics'][key];
           } else if (devData[key] != null) {
             total += devData[key];
           }

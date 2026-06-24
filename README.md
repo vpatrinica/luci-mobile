@@ -88,6 +88,85 @@ lib/
 
 ---
 
+## Teltonika RUTOS Support
+
+This build targets **Teltonika RUTOS** (RUT206 and compatible devices running RUTOS firmware, e.g. `RUTE_R_GPL_00.07.23.6`).
+
+### How authentication works on RUTOS
+
+Standard OpenWrt/LuCI uses a form POST to `/cgi-bin/luci/` that returns a `sysauth` session cookie.  
+RUTOS replaces the LuCI web-UI with **VuCI** and exposes a REST API at `/api/`. Authentication is different:
+
+| Step | Method | Endpoint | Body |
+|------|--------|----------|------|
+| Login | `POST` | `https://<ip>/api/login` | `{"username":"admin","password":"..."}` |
+| Response | — | — | `{"success":true,"data":{"token":"<32-hex>","expires":299,"username":"admin","group":"root"}}` |
+
+The returned `token` is the same ubus session token used for all subsequent `POST /ubus` JSON-RPC calls.
+
+### ubus JSON-RPC endpoint
+
+All API calls go to **`/ubus`** (not `/cgi-bin/luci/admin/ubus`).  
+Standard format:
+```json
+{"jsonrpc":"2.0","id":1,"method":"call","params":["<token>","<object>","<method>",{}]}
+```
+
+### API mapping: luci-rpc → RUTOS
+
+`luci-rpc` is **not available** on RUTOS. The app translates these calls transparently:
+
+| luci-rpc method | RUTOS equivalent | Notes |
+|-----------------|-----------------|-------|
+| `getNetworkDevices` | `network.device status {}` | TX/RX stats under `statistics.rx_bytes` / `statistics.tx_bytes` |
+| `getDHCPLeases` | `dnsmasq ipv4leases` | Normalized to `{dhcp_leases:[{macaddr,ipaddr,hostname,leasetime}]}` |
+| `getWirelessDevices` | `network.wireless status {}` | Same `interfaces[*].ifname` structure |
+
+### Confirmed working ubus objects on RUT206
+
+```
+system board         → hostname, model, kernel
+system info          → uptime, load, memory
+network.interface dump  → interface list with IPs, routes
+network.device status   → per-device TX/RX byte counters
+network.wireless status → radio config and interface names
+dnsmasq ipv4leases   → active DHCP leases
+iwinfo devices       → list wireless interfaces
+iwinfo assoclist     → associated wireless clients
+uci get/set/commit   → UCI config read/write
+rpc-sys reboot       → remote reboot
+```
+
+### SSH investigation (sshpass)
+```bash
+# Firmware
+sshpass -p 'PASSWORD' ssh root@192.168.1.1 "cat /etc/openwrt_release"
+
+# Confirm no luci-rpc
+sshpass -p 'PASSWORD' ssh root@192.168.1.1 "ubus list luci-rpc"
+
+# Test login
+curl -sk -X POST https://192.168.1.1/api/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"PASSWORD"}'
+
+# Test ubus call with token
+TOKEN=<token from above>
+curl -sk -X POST https://192.168.1.1/ubus \
+  -H "Content-Type: application/json" \
+  -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"call\",\"params\":[\"$TOKEN\",\"system\",\"board\",{}]}"
+```
+
+### Code changes made (vs upstream)
+
+| File | Change |
+|------|--------|
+| `lib/services/api_service.dart` | `_login()` uses `POST /api/login` with JSON body; `callWithContext()` posts to `/ubus`; `luci-rpc` calls transparently translated to RUTOS equivalents; `_callRutosDhcpLeases()` normalises dnsmasq lease format |
+| `lib/services/throughput_service.dart` | Added `statistics.rx_bytes/tx_bytes` format (RUTOS `network.device status`) alongside existing `stats.*` and direct `rx_bytes` formats |
+| `lib/state/app_state.dart` | `_pingRouter()` uses `/` and `/api/login` instead of LuCI-specific paths |
+
+---
+
 ## Development & Contribution
 
 - Run in dev mode: `flutter run`

@@ -1126,8 +1126,7 @@ class AppState extends ChangeNotifier {
     final scheme = _authService!.useHttps ? 'https' : 'http';
     final endpoints = [
       '/', // Root
-      '/cgi-bin/luci/', // LuCI login page
-      '/cgi-bin/luci/admin', // Admin page
+      '/api/login', // RUTOS API endpoint (always present)
     ];
 
     for (final endpoint in endpoints) {

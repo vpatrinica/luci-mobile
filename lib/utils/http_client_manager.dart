@@ -338,6 +338,9 @@ class HttpClientManager {
             // Store acceptance persistently
             _userAcceptedCerts['$host:$port'] = true;
             await _saveAcceptedCertificates();
+            // Dispose the cached Dio client so the next call creates a fresh one
+            // whose HttpClient starts with the acceptance already in place.
+            disposeClient(hostWithPort, useHttps);
             return true;
           }
         }
