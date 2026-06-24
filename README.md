@@ -92,6 +92,8 @@ lib/
 
 This project now has first-class support for Teltonika RUTOS devices such as the RUT206. The app uses the router’s native REST API under `/api/` instead of the older LuCI-style RPC flow.
 
+For a detailed summary of findings, fixes, reproduction steps, and troubleshooting commands, see the RUTOS & Debugging Walkthrough: [docs/RUTOS_and_Debugging_Walkthrough.md](docs/RUTOS_and_Debugging_Walkthrough.md)
+
 ### What the app now does
 
 - Logs in through `POST /api/login`
